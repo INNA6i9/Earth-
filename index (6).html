@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Earth Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #earth-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 300px;
+            backdrop-filter: blur(5px);
+            z-index: 100;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 1.5rem;
+            z-index: 100;
+        }
+        .glow {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, rgba(64, 158, 255, 0.3) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 1;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 100;
+        }
+        .control-btn {
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(5px);
+        }
+        .control-btn:hover {
+            background: rgba(30, 144, 255, 0.8);
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="earth-container">
+        <div class="glow"></div>
+        <div id="loading">Loading Earth...</div>
+        <div id="info-panel">
+            <h2 class="text-xl font-bold mb-2">Planet Earth</h2>
+            <p class="text-sm mb-2">Our beautiful blue planet, the third from the Sun and the only known astronomical object to harbor life.</p>
+            <div class="flex justify-between text-xs">
+                <div>
+                    <p><span class="font-semibold">Diameter:</span> 12,742 km</p>
+                    <p><span class="font-semibold">Mass:</span> 5.97 × 10²⁴ kg</p>
+                </div>
+                <div>
+                    <p><span class="font-semibold">Moons:</span> 1 (The Moon)</p>
+                    <p><span class="font-semibold">Distance from Sun:</span> 149.6M km</p>
+                </div>
+            </div>
+        </div>
+        <div id="controls">
+            <button id="rotate-toggle" class="control-btn" title="Toggle Rotation">↻</button>
+            <button id="reset-view" class="control-btn" title="Reset View">⌂</button>
+            <button id="night-toggle" class="control-btn" title="Toggle Night View">🌙</button>
+        </div>
+    </div>
+
+    <script>
+        // Wait for DOM to load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Scene setup
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('earth-container').appendChild(renderer.domElement);
+
+            // Controls
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 1.5;
+            controls.maxDistance = 5;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.5;
+
+            // Camera position
+            camera.position.z = 3;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 3, 5);
+            scene.add(directionalLight);
+
+            // Earth geometry
+            const earthGeometry = new THREE.SphereGeometry(1, 64, 64);
+
+            // Textures
+            const textureLoader = new THREE.TextureLoader();
+            let earthTexture, bumpMap, specularMap, cloudTexture;
+
+            // Load textures
+            Promise.all([
+                new Promise(resolve => textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg', resolve)),
+                new Promise(resolve => textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_normal_2048.jpg', resolve)),
+                new Promise(resolve => textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_specular_2048.jpg', resolve)),
+                new Promise(resolve => textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_clouds_1024.png', resolve))
+            ]).then(([earthTex, bump, specular, clouds]) => {
+                earthTexture = earthTex;
+                bumpMap = bump;
+                specularMap = specular;
+                cloudTexture = clouds;
+
+                // Create earth material
+                const earthMaterial = new THREE.MeshPhongMaterial({
+                    map: earthTexture,
+                    bumpMap: bumpMap,
+                    bumpScale: 0.05,
+                    specularMap: specularMap,
+                    specular: new THREE.Color('grey'),
+                    shininess: 5
+                });
+
+                // Create earth mesh
+                const earthMesh = new THREE.Mesh(earthGeometry, earthMaterial);
+                scene.add(earthMesh);
+
+                // Create clouds
+                const cloudGeometry = new THREE.SphereGeometry(1.01, 64, 64);
+                const cloudMaterial = new THREE.MeshPhongMaterial({
+                    map: cloudTexture,
+                    transparent: true,
+                    opacity: 0.4,
+                    depthWrite: false
+                });
+                const cloudMesh = new THREE.Mesh(cloudGeometry, cloudMaterial);
+                scene.add(cloudMesh);
+
+                // Create atmosphere glow
+                const atmosphereGeometry = new THREE.SphereGeometry(1.1, 64, 64);
+                const atmosphereMaterial = new THREE.ShaderMaterial({
+                    uniforms: {
+                        glowColor: { type: "c", value: new THREE.Color(0x00b3ff) },
+                        viewVector: { type: "v3", value: camera.position }
+                    },
+                    vertexShader: `
+                        uniform vec3 viewVector;
+                        varying float intensity;
+                        void main() {
+                            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                            vec3 actual_normal = normalize(normalMatrix * normal);
+                            intensity = pow(0.7 - dot(actual_normal, normalize(viewVector)), 2.0);
+                        }
+                    `,
+                    fragmentShader: `
+                        uniform vec3 glowColor;
+                        varying float intensity;
+                        void main() {
+                            vec3 glow = glowColor * intensity;
+                            gl_FragColor = vec4(glow, 0.3);
+                        }
+                    `,
+                    side: THREE.BackSide,
+                    blending: THREE.AdditiveBlending,
+                    transparent: true
+                });
+                const atmosphereMesh = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+                scene.add(atmosphereMesh);
+
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+
+                // Animation loop
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    
+                    // Rotate earth and clouds
+                    if (controls.autoRotate) {
+                        earthMesh.rotation.y += 0.001;
+                        cloudMesh.rotation.y += 0.0015; // Clouds rotate slightly faster
+                    }
+                    
+                    // Update atmosphere shader
+                    atmosphereMaterial.uniforms.viewVector.value = 
+                        new THREE.Vector3().subVectors(camera.position, atmosphereMesh.position);
+                    
+                    controls.update();
+                    renderer.render(scene, camera);
+                };
+                animate();
+
+                // UI Controls
+                document.getElementById('rotate-toggle').addEventListener('click', () => {
+                    controls.autoRotate = !controls.autoRotate;
+                    document.getElementById('rotate-toggle').style.backgroundColor = 
+                        controls.autoRotate ? 'rgba(30, 144, 255, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+                });
+
+                document.getElementById('reset-view').addEventListener('click', () => {
+                    controls.reset();
+                    camera.position.z = 3;
+                });
+
+                document.getElementById('night-toggle').addEventListener('click', function() {
+                    const isNight = earthMaterial.specular.getHex() === 0x000000;
+                    earthMaterial.specular.setHex(isNight ? 0x111111 : 0x000000);
+                    earthMaterial.shininess = isNight ? 5 : 0;
+                    this.style.backgroundColor = isNight ? 'rgba(0, 0, 0, 0.7)' : 'rgba(30, 144, 255, 0.8)';
+                });
+
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+            }).catch(error => {
+                console.error('Error loading textures:', error);
+                document.getElementById('loading').textContent = 'Error loading Earth textures. Please check your connection.';
+            });
+
+            // Add stars background
+            const starGeometry = new THREE.BufferGeometry();
+            const starMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.05,
+                transparent: true
+            });
+
+            const starVertices = [];
+            for (let i = 0; i < 5000; i++) {
+                const x = (Math.random() - 0.5) * 2000;
+                const y = (Math.random() - 0.5) * 2000;
+                const z = (Math.random() - 0.5) * 2000;
+                starVertices.push(x, y, z);
+            }
+
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        });
+    </script>
+<p style="border-radius: 8px; text-align: center; font-size: 12px; color: #fff; margin-top: 16px;position: fixed; left: 8px; bottom: 8px; z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 4px 8px;">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo" style="width: 16px; height: 16px; vertical-align: middle;display:inline-block;margin-right:3px;filter:brightness(0) invert(1);"><a href="https://enzostvs-deepsite.hf.space" style="color: #fff;text-decoration: underline;" target="_blank" >DeepSite</a> - <a href="https://enzostvs-deepsite.hf.space?remix=suongbipun1234/my-beautiful-earth" style="color: #fff;text-decoration: underline;" target="_blank" >🧬 Remix</a></p></body>
+</html>
